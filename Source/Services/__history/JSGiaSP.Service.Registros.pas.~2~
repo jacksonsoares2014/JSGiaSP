@@ -1,0 +1,319 @@
+unit JSGiaSP.Service.Registros;
+
+interface
+
+uses
+  //JSGiaSP.Model.Consts,
+  JSGiaSP.Model.Classes,
+  JSGiaSP.Model.Types,
+  JSGiaSP.Export.Interfaces,
+  JSGiaSP.Service.Interfaces,
+  JSGiaSP.DAO.Interfaces,
+  System.Threading,
+  System.DateUtils,
+  System.Generics.Collections,
+  System.Generics.Defaults,
+  System.SysUtils,
+  System.Classes;
+
+type
+  TJSGiaSPServiceRegistros = class(TInterfacedObject, IJSGiaSPServiceRegistros)
+  private
+    [Weak]
+    FGiaSPService: IJSGiaSPService;
+
+    FacadeExport: IJSGiaSPExportFacade;
+    FArquivo    : TStrings;
+
+    FCountReg10,
+    FCountReg20,
+    FCountReg30 : Integer;
+
+    procedure OnAddRegistro(Registro: TJSGiaSPModelRegistro);
+    procedure AdicionaLinhaGiaSP(ARegistro: TJSGiaSPModelRegistro; AArquivo: TStrings);
+
+    procedure GerarReg01;
+    procedure GerarReg05;
+    procedure GerarReg10(AlistReg10: TStrings);
+    procedure GerarReg14(Acfop: string; AlistReg14: TStrings);
+    procedure GerarReg20(AlistReg20: TStrings);
+    procedure GerarReg30(AlistReg30: TStrings);
+
+  protected
+    function Execute: TStrings;
+    function &End: IJSGiaSPService;
+  public
+    constructor create(Parent: IJSGiaSPService);
+    class function New(Parent: IJSGiaSPService): IJSGiaSPServiceRegistros;
+    destructor Destroy; override;
+  end;
+
+
+implementation
+
+{ TJSGiaSPServiceRegistros }
+
+procedure TJSGiaSPServiceRegistros.AdicionaLinhaGiaSP(
+  ARegistro: TJSGiaSPModelRegistro; AArquivo: TStrings);
+var
+  linhaGiaSP: string;
+begin
+  linhaGiaSP := FacadeExport.linhaGiaSP(ARegistro);
+  AArquivo.Add(linhaGiaSP);
+  OnAddRegistro(ARegistro);
+end;
+
+constructor TJSGiaSPServiceRegistros.create(Parent: IJSGiaSPService);
+begin
+  FGiaSPService   := Parent;
+  FArquivo       := TStringList.Create;
+
+  FacadeExport   := JSGiaSP.Export.Interfaces
+                      .FacadeExport(FGiaSPService.Emitente, FGiaSPService.Config);
+end;
+
+destructor TJSGiaSPServiceRegistros.Destroy;
+begin
+
+  inherited;
+end;
+
+function TJSGiaSPServiceRegistros.&End: IJSGiaSPService;
+begin
+  result := FGiaSPService;
+end;
+
+function TJSGiaSPServiceRegistros.Execute: TStrings;
+var
+  listReg10: TStringList;
+  listReg20: TStringList;
+  listReg30: TStringList;
+
+  procedure AddGiaSP(AReg: TStrings);
+  var
+    i : Integer;
+  begin
+    for i := 0 to Pred(AReg.Count) do
+      FArquivo.Add(AReg[i]);
+  end;
+begin
+  listReg10 := TStringList.Create;
+  listReg20 := TStringList.Create;
+  listReg30 := TStringList.Create;
+
+  FCountReg10 := 0;
+  FCountReg20 := 0;
+  FCountReg30 := 0;
+
+  try
+    try
+      if FGiaSPService.Config.Movimento = tmSim then
+      begin
+        GerarReg10(listReg10);
+        GerarReg20(listReg20);
+        GerarReg30(listReg30);
+      end;
+
+      GerarReg01;
+      GerarReg05;
+      AddGiaSP(listReg10);
+      AddGiaSP(listReg20);
+      AddGiaSP(listReg30);
+
+      result := FArquivo;
+    except
+      on e: Exception Do
+      begin
+        FArquivo.Free;
+        Raise;
+      end;
+    end;
+  finally
+    listReg10.Free;
+    listReg20.Free;
+    listReg30.Free;
+  end;
+end;
+
+procedure TJSGiaSPServiceRegistros.GerarReg01;
+var
+  Reg01 : TJSGiaSPModelRegistro01;
+  dDia : TDateTime;
+begin
+  dDia := Now;
+  Reg01 := TJSGiaSPModelRegistro01.create;
+  try
+    Reg01.tipoDocto       := '01';
+    Reg01.dataGeracao     := Now;
+    Reg01.horaGeracao     := Now;
+    Reg01.versaoFrontEnd  := '0';
+    Reg01.versaoPref      := '0210';
+    Reg01.q05             := 1;
+
+    AdicionaLinhaGiaSP(Reg01, FArquivo);
+  finally
+    Reg01.Free;
+  end;
+end;
+
+procedure TJSGiaSPServiceRegistros.GerarReg05;
+var
+  Reg05 : TJSGiaSPModelRegistro05;
+  sRefInicial : string;
+begin
+  Reg05 := TJSGiaSPModelRegistro05.create;
+  try
+    sRefInicial := '000000';
+    if FGiaSPService.Config.RegimeTributario = rtRES then
+      sRefInicial := Reg05.ref;
+
+    Reg05.ie                    := FGiaSPService.Emitente.IncricaoEstadual.Trim;
+    Reg05.cnpj                  := FGiaSPService.Emitente.CNPJ;
+    Reg05.cnae                  := '0';
+    Reg05.regTrib               := FGiaSPService.Config.RegimeTributario;
+    Reg05.ref                   := FormatDateTime('yyyyMM', FGiaSPService.Config.DataInicial);
+    Reg05.refInicial            := sRefInicial;
+    Reg05.tipo                  := FGiaSPService.Config.TipoGia;
+    Reg05.movimento             := FGiaSPService.Config.Movimento;
+    Reg05.transmitida           := '0';
+    Reg05.saldoCredPeriodoAnt   := 0;
+    Reg05.saldoCredPeriodoAntST := 0;
+    Reg05.origemSoftware        := '29185659000141'; //CNPJ do Fabricante.
+    Reg05.origemPreDig          := '0';
+    Reg05.icmsFixPer            := 0;
+    Reg05.chaveInterna          := '0';
+    Reg05.q07                   := 0;
+    Reg05.q10                   := FCountReg10;
+    Reg05.q20                   := FCountReg20;
+    Reg05.q30                   := FCountReg30;
+    Reg05.q31                   := 0;
+
+    AdicionaLinhaGiaSP(Reg05, FArquivo);
+  finally
+    Reg05.Free;
+  end;
+end;
+
+procedure TJSGiaSPServiceRegistros.GerarReg10(AlistReg10: TStrings);
+var
+  i         : Integer;
+  dao       : IJSGiaSPDAORegistro10;
+  reg10     : TJSGiaSPModelRegistro10;
+  reg10List : TObjectList<TJSGiaSPModelRegistro10>;
+  listReg14 : TStringList;
+begin
+  dao := FGiaSPService.DAO.DAORegistro10;
+  if not Assigned(dao) then
+    Exit;
+
+  reg10List := dao.listReg10(FGiaSPService.Config.DataInicial, FGiaSPService.Config.DataFinal);
+  try
+    for i:= 0 to Pred(reg10List.Count) do
+    begin
+      reg10 := reg10List[i];
+
+      if (Copy(reg10.cfop,1,1) = '2') or (Copy(reg10.cfop,1,1) = '6') then
+      begin
+        listReg14 := TStringList.Create;
+        try
+          GerarReg14(reg10.cfop, listReg14);
+          reg10.q14 := listReg14.Count;
+        finally
+          listReg14.Free;
+        end;
+      end;
+
+      AdicionaLinhaGiaSP(reg10, AlistReg10);
+      Inc(FCountReg10);
+
+    end;
+  finally
+    reg10List.Free;
+  end;
+end;
+
+procedure TJSGiaSPServiceRegistros.GerarReg14(Acfop: string;
+  AlistReg14: TStrings);
+var
+  i         : Integer;
+  dao       : IJSGiaSPDAORegistro14;
+  reg14     : TJSGiaSPModelRegistro14;
+  reg14List : TObjectList<TJSGiaSPModelRegistro14>;
+begin
+  dao := FGiaSPService.DAO.DAORegistro14;
+  if not Assigned(dao) then
+    Exit;
+
+  reg14List := dao.listReg14(Acfop);
+  try
+    for i:= 0 to Pred(reg14List.Count) do
+    begin
+      reg14 := reg14List[i];
+      AdicionaLinhaGiaSP(reg14, AlistReg14);
+    end;
+  finally
+    reg14List.Free;
+  end;
+end;
+
+procedure TJSGiaSPServiceRegistros.GerarReg20(AlistReg20: TStrings);
+var
+  i         : Integer;
+  dao       : IJSGiaSPDAORegistro20;
+  reg20     : TJSGiaSPModelRegistro20;
+begin
+  dao := FGiaSPService.DAO.DAORegistro20;
+  if not Assigned(dao) then
+    Exit;
+
+  reg20 := dao.load;
+  try
+    AdicionaLinhaGiaSP(reg20, AlistReg20);
+    Inc(FCountReg20);
+  finally
+    reg20.Free;
+  end;
+end;
+
+procedure TJSGiaSPServiceRegistros.GerarReg30(AlistReg30: TStrings);
+var
+  i         : Integer;
+  dao       : IJSGiaSPDAORegistro30;
+  reg30     : TJSGiaSPModelRegistro30;
+  reg30List : TObjectList<TJSGiaSPModelRegistro30>;
+begin
+  dao := FGiaSPService.DAO.DAORegistro30;
+  if not Assigned(dao) then
+    Exit;
+
+  reg30List := dao.listReg30;
+  try
+    for i:= 0 to Pred(reg30List.Count) do
+    begin
+      reg30 := reg30List[i];
+      AdicionaLinhaGiaSP(reg30, AlistReg30);
+      Inc(FCountReg30);
+    end;
+  finally
+    reg30List.Free;
+  end;
+end;
+
+class function TJSGiaSPServiceRegistros.New(
+  Parent: IJSGiaSPService): IJSGiaSPServiceRegistros;
+begin
+  Result := Self.create(Parent);
+end;
+
+procedure TJSGiaSPServiceRegistros.OnAddRegistro(
+  Registro: TJSGiaSPModelRegistro);
+var
+  onAddRegistro: TOnGiaSPAddRegistro;
+begin
+  onAddRegistro := FGiaSPService.Config.OnAddRegistro;
+
+  if Assigned(onAddRegistro) then
+    onAddRegistro(Registro);
+end;
+
+end.
